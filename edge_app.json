@@ -1,7 +1,7 @@
 {
   "category": "value-transformer",
   "description": "",
-  "name": "Test name",
+  "name": "Dew point and frost precipitation calculator for DL-WRM",
   "public": true,
   "publisher": {
     "id": 1
@@ -11,6 +11,7 @@
   "tags": [
     "dewpoint",
     "frost",
-    "precipitation"
+    "precipitation",
+    "transform"
   ]
 }

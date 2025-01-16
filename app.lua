@@ -1,11 +1,6 @@
---[[
-Takes temperature data from DL-WRM2 and returns dew point and frost precipitation
-]] --
-
--- Configuration for how long to wait for all measurements before processing
 local CONFIG = {
     -- Maximum age of measurements to consider valid (in milliseconds)
-    MAX_AGE_MS = 60000, -- 1 minute
+    MAX_AGE_MS = 60000 * 5, -- 5 minutes
     -- Required measurements for processing
     REQUIRED_MEASUREMENTS = {
         "air_temperature",
@@ -20,7 +15,6 @@ local CONFIG = {
     }
 }
 
--- Store for latest measurements
 local measurements = {
     data = {},
     timestamps = {}
@@ -132,7 +126,7 @@ function handleMessage(topic, payload, retained)
 
         -- Publish each result to its respective topic
         publishResult(eui, CONFIG.PUBLISH_TOPICS.dewPoint, dewPointData)
-        publishResult(eui, CONFIG.PUBLISH_TOPICS.precipitation, forstRiskData)
+        publishResult(eui, CONFIG.PUBLISH_TOPICS.frost_precipitation, forstRiskData)
 
         -- Clear processed measurements
         measurements.data = {}
@@ -180,14 +174,9 @@ function checkFrostPrecipitation(surfaceTemp, dewPoint, headTemp)
     return result
 end
 
--- Main processing function that returns structured data
 function processWeatherData(airTemp, humidity, surfaceTemp, headTemp)
-    -- Calculate dew point
     local dewPoint = calculateDewPoint(airTemp, humidity)
-
-    -- Check frost precipitation conditions
     local frostResult = checkFrostPrecipitation(surfaceTemp, dewPoint, headTemp)
-
 
     -- Prepare return data structures
     local dewPointData = {
