@@ -1,0 +1,28 @@
+{
+    "author": "IoT Open",
+    "license": "MIT",
+    "input": {
+        "functions": {
+            "required": true,
+            "name": "Trigger functions",
+            "description": "Only functions of the type 'temperature' and 'humidity' is shown",
+            "type": "multi_function_selector",
+            "filter": {
+                "type": [
+                    "temperature",
+                    "humidity"
+                ]
+            }
+        }
+    },
+    "guide": [
+        {
+            "id": "stage_1",
+            "title": "Configuration",
+            "description": "",
+            "input_fields": [
+                "functions"
+            ]
+        }
+    ]
+}

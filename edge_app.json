@@ -1,0 +1,17 @@
+{
+  "category": "value-transformer",
+  "description": "",
+  "name": "Dew point and frost precipitation calculator for DL-WRM",
+  "public": true,
+  "publisher": {
+    "id": 1
+  },
+  "short_description": "Calculate dew point and frost precipitation using data from DL-WRM",
+  "source_url": "https://github.com/IoTOpen/edge-app-medicinskap-temp-monitoring",
+  "tags": [
+    "dewpoint",
+    "frost",
+    "precipitation",
+    "transform"
+  ]
+}
