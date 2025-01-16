@@ -5,7 +5,7 @@
         "functions": {
             "required": true,
             "name": "Trigger functions",
-            "description": "These functions will be covered by this temperature alarm. Only functions of the type 'temperature' is shown",
+            "description": "Only functions of the type 'temperature' and 'humidity' is shown",
             "type": "multi_function_selector",
             "filter": {
                 "type": [
@@ -21,9 +21,7 @@
             "title": "Configuration",
             "description": "",
             "input_fields": [
-                "functions",
-                "delay",
-                "notificationOutput"
+                "functions"
             ]
         }
     ]
