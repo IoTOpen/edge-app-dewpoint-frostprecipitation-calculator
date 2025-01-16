@@ -1,0 +1,30 @@
+{
+    "author": "IoT Open",
+    "license": "MIT",
+    "input": {
+        "functions": {
+            "required": true,
+            "name": "Trigger functions",
+            "description": "These functions will be covered by this temperature alarm. Only functions of the type 'temperature' is shown",
+            "type": "multi_function_selector",
+            "filter": {
+                "type": [
+                    "temperature",
+                    "humidity"
+                ]
+            }
+        }
+    },
+    "guide": [
+        {
+            "id": "stage_1",
+            "title": "Configuration",
+            "description": "",
+            "input_fields": [
+                "functions",
+                "delay",
+                "notificationOutput"
+            ]
+        }
+    ]
+}

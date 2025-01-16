@@ -1,0 +1,15 @@
+{
+    "id": 1,
+    "app_id": 1,
+    "installation_id": 1,
+    "version": "1.0.0",
+    "config": {
+      "overOrUnder": "under",
+      "functions": [1,2,3],
+      "threshold": 10,
+      "delay": 5,
+      "notificationOutput": 19
+    },
+    "name": "Temperature notification"
+  }
+  
