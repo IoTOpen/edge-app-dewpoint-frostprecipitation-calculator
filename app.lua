@@ -27,33 +27,9 @@ local measurements = {
     },
     timestamps = {}
 }
-function printTable(t, indent)
-    -- Set default indentation if not provided
-    indent = indent or 0
-    local indentStr = string.rep("  ", indent)
-
-    -- Check if the table is a valid table and not nil
-    if type(t) ~= "table" then
-        print(indentStr .. tostring(t))
-        return
-    end
-
-    -- Iterate through each key-value pair in the table
-    for key, value in pairs(t) do
-        -- Print the key with the indentation
-        if type(value) == "table" then
-            -- If the value is a table, recursively call printTable
-            print(indentStr .. tostring(key) .. ":")
-            printTable(value, indent + 1)
-        else
-            -- Otherwise, just print the key and value
-            print(indentStr .. tostring(key) .. ": " .. tostring(value))
-        end
-    end
-end
 
 -- get all functions with type value-transformer, if 0 create call createFucntions
-function checkIfFunctionExist(eui, topic)
+local function checkIfFunctionExist(eui, topic)
     print("check if finction exist on device", string.format('obj/lora/%s/%s', eui, topic))
     local functions = lynx.getFunctions({
         topic_read = string.format('obj/lora/%s/%s', eui, topic)
@@ -65,10 +41,10 @@ function checkIfFunctionExist(eui, topic)
     return false
 end
 
-function createFunctions()
-    devs = checkDeviceForDecoder()
-    --146/obj/lora/70b3d57ba0005e53/frost_precipitation
-    -- 146/obj/lora/70b3d57ba0005e53/dew_point {"value":-1.2744592773123,"timestamp":1737366082.3669,"msg":"Dew point: -1.3°C"}
+
+local function createFunctions()
+    devs = edge.findDevices({ ["lora_manager.decoder_name"] = "decentlab.dlwrm" })
+
     topics = {
         "dew_point",
         "frost_precipitation"
@@ -98,27 +74,6 @@ function createFunctions()
             end
         end
     end
-end
-
-function checkDeviceForDecoder()
-    -- find devices that has
-    print("check if function exist")
-    -- devs = edge.findDevices(cfg.devices)
-    --local criteria = { meta = { eui = "70b3d57ba0005e53" } } can this be done somehow? wanna match on lora.decoder_name
-    -- devs = edge.findDevices(criteria)
-    devs = edge.findDevices({ type = "lora" })
-    printTable(devs)
-    for _, dev in ipairs(devs) do
-        for k, v in pairs(dev.meta) do
-            if k == "lora_manager.decoder_name" and v == CONFIG.DECODER_NAME then
-                print("found", k, v)
-                table.insert(devices, dev)
-            end
-        end
-    end
-    print("filtered devices")
-    printTable(devices)
-    return devices
 end
 
 -- Function to calculate dew point using Magnus formula
@@ -156,9 +111,9 @@ local function checkFrostPrecipitation(surfaceTemp, dewPoint)
     return result
 end
 
-local function processWeatherData(airTemp, humidity, surfaceTemp, headTemp)
+local function processWeatherData(airTemp, humidity, surfaceTemp)
     local dewPoint = calculateDewPoint(airTemp, humidity)
-    local frostResult = checkFrostPrecipitation(surfaceTemp, dewPoint, headTemp)
+    local frostResult = checkFrostPrecipitation(surfaceTemp, dewPoint)
 
     -- Prepare return data structures
     local dewPointData = {

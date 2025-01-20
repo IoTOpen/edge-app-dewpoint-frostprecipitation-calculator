@@ -24,7 +24,11 @@ Td = Dew point temperature in °C
 ```
 
 ### Frost Precipitation
-Logic for calculating frost precipitation, make use of calculated dew point and surface temperature
+Logic for calculating frost precipitation, make use of calculated dew point and surface temperature.
+
+0 = No possibility of frost
+1 = Frost is possible
+
 ```lua
     -- Check if surface temperature is below freezing
     if surfaceTemp <= 0 then
