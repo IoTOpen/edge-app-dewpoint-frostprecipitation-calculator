@@ -134,7 +134,7 @@ local function calculateDewPoint(airTemp, relativeHumidity)
 end
 
 -- Function to check for frost precipitation conditions
-local function checkFrostPrecipitation(surfaceTemp, dewPoint, headTemp)
+local function checkFrostPrecipitation(surfaceTemp, dewPoint)
     local result = {
         isFrostPossible = 0, -- false
         reason = "",
