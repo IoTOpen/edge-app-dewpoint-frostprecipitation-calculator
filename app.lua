@@ -91,7 +91,7 @@ function createFunctions()
                     }
                 }
                 if topic == "dew_point" then
-                    fn.meta.unit = "C"
+                    fn.meta.unit = "°C"
                     fn.meta.format = "%.1f°C"
                 end
                 lynx.createFunction(fn)
