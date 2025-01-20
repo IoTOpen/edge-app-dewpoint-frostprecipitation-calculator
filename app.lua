@@ -1,7 +1,10 @@
+local createFunction = false
+local devices = {}
+local topicMap = {}
 local CONFIG = {
+    DECODER_NAME = "decentlab.dlwrm",
     -- Maximum age of measurements to consider valid (in milliseconds)
-    MAX_AGE_MS = 60000 * 5, -- 5 minutes
-    -- Required measurements for processing
+    MAX_AGE_MS = 10000 * 1, -- 5 minutes
     REQUIRED_MEASUREMENTS = {
         "air_temperature",
         "air_humidity",
@@ -11,136 +14,115 @@ local CONFIG = {
     -- Topics for publishing results
     PUBLISH_TOPICS = {
         dewPoint = "obj/lora/%s/dew_point",
-        frost_precipitation = "obj/lora/%s/frost_precipitation"
+        frostPrecipitation = "obj/lora/%s/frost_precipitation"
     }
 }
 
 local measurements = {
-    data = {},
+    data = {
+        air_temperature = nil,
+        air_humidity = nil,
+        surface_temperature = nil,
+        head_temperature = nil
+    },
     timestamps = {}
 }
+function printTable(t, indent)
+    -- Set default indentation if not provided
+    indent = indent or 0
+    local indentStr = string.rep("  ", indent)
 
--- Helper function to clean old measurements
-local function cleanOldMeasurements()
-    local now = edge:time() -- current time in ms
-    for topic, timestamp in pairs(measurements.timestamps) do
-        if (now - timestamp) > CONFIG.MAX_AGE_MS then
-            measurements.data[topic] = nil
-            measurements.timestamps[topic] = nil
+    -- Check if the table is a valid table and not nil
+    if type(t) ~= "table" then
+        print(indentStr .. tostring(t))
+        return
+    end
+
+    -- Iterate through each key-value pair in the table
+    for key, value in pairs(t) do
+        -- Print the key with the indentation
+        if type(value) == "table" then
+            -- If the value is a table, recursively call printTable
+            print(indentStr .. tostring(key) .. ":")
+            printTable(value, indent + 1)
+        else
+            -- Otherwise, just print the key and value
+            print(indentStr .. tostring(key) .. ": " .. tostring(value))
         end
     end
 end
 
--- Helper function to check if we have all required measurements
-local function hasAllMeasurements()
-    for _, measurement in ipairs(CONFIG.REQUIRED_MEASUREMENTS) do
-        if measurements.data[measurement] == nil then
-            return false
-        end
+-- get all functions with type value-transformer, if 0 create call createFucntions
+function checkIfFunctionExist(eui, topic)
+    print("check if finction exist on device", string.format('obj/lora/%s/%s', eui, topic))
+    local functions = lynx.getFunctions({
+        topic_read = string.format('obj/lora/%s/%s', eui, topic)
+    })
+    if #functions > 0 then
+        return true
     end
-    return true
+    print("false")
+    return false
 end
 
--- Helper function to check if measurements are within acceptable time window
-local function measurementsInTimeWindow()
-    local oldest = math.huge
-    local newest = 0
+function createFunctions()
+    devs = checkDeviceForDecoder()
+    --146/obj/lora/70b3d57ba0005e53/frost_precipitation
+    -- 146/obj/lora/70b3d57ba0005e53/dew_point {"value":-1.2744592773123,"timestamp":1737366082.3669,"msg":"Dew point: -1.3°C"}
+    topics = {
+        "dew_point",
+        "frost_precipitation"
+    }
+    -- Loop trough devices
+    for _, dev in ipairs(devs) do
+        -- for each topic create function
+        for _, topic in ipairs(topics) do
+            if checkIfFunctionExist(dev.meta.eui, topic) == false then
+                print("creating function", topic, dev)
+                local fn = {
+                    type = topic,
+                    installation_id = app.installation_id,
+                    meta = {
+                        device_id = tostring(dev.id),
+                        eui = dev.meta.eui,
+                        name = string.format('%s - %s', dev.meta.eui, topic),
+                        topic_read = string.format('obj/lora/%s/%s', dev.meta.eui, topic)
 
-    for _, timestamp in pairs(measurements.timestamps) do
-        oldest = math.min(oldest, timestamp)
-        newest = math.max(newest, timestamp)
-    end
-
-    return (newest - oldest) <= CONFIG.MAX_AGE_MS
-end
-
-
--- when new values arrive on filtered topics
-function onFunctionsUpdated()
-    -- First, unsubscribe from all existing topics
-    for topic, _ in pairs(topicMap) do
-        mq:unsub(topic)
-    end
-
-    -- clear map
-    topicMap = {}
-
-    -- find specified functions using filters in cfg
-    local funs = edge.findFunctions(cfg.functions)
-
-    -- for each function
-    for _, fun in ipairs(funs) do
-        -- check metadata
-        for k, v in pairs(fun.meta) do
-            -- look for topic_read, store topic and subscribe
-            if k:sub(1, #"topic_read") == "topic_read" then
-                topicMap[v] = fun
-                mq:sub(v, 0)
+                    }
+                }
+                if topic == "dew_point" then
+                    fn.meta.unit = "C"
+                    fn.meta.format = "%.1f°C"
+                end
+                lynx.createFunction(fn)
             end
         end
     end
 end
 
--- Helper function to publish a single result
-local function publishResult(eui, topicTemplate, data)
-    local topic = string.format(topicTemplate, eui)
-    local payload = json:encode({
-        value = data.val,
-        msg = data.msg,
-        timestamp = edge:time()
-    })
-    mq:pub(topic, payload, false, 0)
-end
-
--- read function data, perform action depending on logic
-function handleMessage(topic, payload, retained)
-    local fun = topicMap[topic]
-    if fun == nil then
-        return
+function checkDeviceForDecoder()
+    -- find devices that has
+    print("check if function exist")
+    -- devs = edge.findDevices(cfg.devices)
+    --local criteria = { meta = { eui = "70b3d57ba0005e53" } } can this be done somehow? wanna match on lora.decoder_name
+    -- devs = edge.findDevices(criteria)
+    devs = edge.findDevices({ type = "lora" })
+    printTable(devs)
+    for _, dev in ipairs(devs) do
+        for k, v in pairs(dev.meta) do
+            if k == "lora_manager.decoder_name" and v == CONFIG.DECODER_NAME then
+                print("found", k, v)
+                table.insert(devices, dev)
+            end
+        end
     end
-
-    -- * Decode payload
-    local data = json:decode(payload)
-    local timestamp = edge:time() -- current time in ms
-
-    -- Store measurement with timestamp
-    local measurementType = fun.meta["lora_type"]
-    measurements.data[measurementType] = data
-    measurements.timestamps[measurementType] = timestamp
-
-    -- Clean any old measurements
-    cleanOldMeasurements()
-
-    -- Check if we have all required measurements within time window
-    if hasAllMeasurements() and measurementsInTimeWindow() then
-        local airTemp = measurements.data["air_temperature"]
-        local humidity = measurements.data["air_humidity"]
-        local surfaceTemp = measurements.data["surface_temperature"]
-        local headTemp = measurements.data["head_temperature"]
-
-
-        local dewPointData, forstRiskData = processWeatherData(airTemp, humidity, surfaceTemp, headTemp)
-
-        -- prepare and publish results
-        local eui = fun.meta["eui"]
-
-        -- Publish each result to its respective topic
-        publishResult(eui, CONFIG.PUBLISH_TOPICS.dewPoint, dewPointData)
-        publishResult(eui, CONFIG.PUBLISH_TOPICS.frost_precipitation, forstRiskData)
-
-        -- Clear processed measurements
-        measurements.data = {}
-        measurements.timestamps = {}
-    end
-end
-
-function onStart()
-    mq:bind("#", handleMessage)
-    onFunctionsUpdated()
+    print("filtered devices")
+    printTable(devices)
+    return devices
 end
 
 -- Function to calculate dew point using Magnus formula
-function calculateDewPoint(airTemp, relativeHumidity)
+local function calculateDewPoint(airTemp, relativeHumidity)
     -- Constants for Magnus formula
     local a = 17.27
     local b = 237.7
@@ -152,7 +134,7 @@ function calculateDewPoint(airTemp, relativeHumidity)
 end
 
 -- Function to check for frost precipitation conditions
-function checkFrostPrecipitation(surfaceTemp, dewPoint, headTemp)
+local function checkFrostPrecipitation(surfaceTemp, dewPoint, headTemp)
     local result = {
         isFrostPossible = 0, -- false
         reason = "",
@@ -174,7 +156,7 @@ function checkFrostPrecipitation(surfaceTemp, dewPoint, headTemp)
     return result
 end
 
-function processWeatherData(airTemp, humidity, surfaceTemp, headTemp)
+local function processWeatherData(airTemp, humidity, surfaceTemp, headTemp)
     local dewPoint = calculateDewPoint(airTemp, humidity)
     local frostResult = checkFrostPrecipitation(surfaceTemp, dewPoint, headTemp)
 
@@ -190,4 +172,121 @@ function processWeatherData(airTemp, humidity, surfaceTemp, headTemp)
     }
 
     return dewPointData, frostRiskData
+end
+
+-- function to publish a single result
+local function publishResult(eui, topicTemplate, data)
+    local topic = string.format(topicTemplate, eui)
+    local payload = json:encode({
+        value = data.val,
+        msg = data.msg,
+        timestamp = edge:time()
+    })
+    mq:pub(topic, payload, false, 0)
+end
+
+-- Helper function to clean old measurements
+local function cleanOldMeasurements()
+    local now = edge:time() -- current time in ms
+    for topic, timestamp in pairs(measurements.timestamps) do
+        if (now - timestamp) > CONFIG.MAX_AGE_MS then
+            measurements.data[topic] = nil
+            measurements.timestamps[topic] = nil
+        end
+    end
+end
+
+-- function to check if we have all required measurements
+local function hasAllMeasurements()
+    for _, measurement in ipairs(CONFIG.REQUIRED_MEASUREMENTS) do
+        if measurements.data[measurement] == nil then
+            return false
+        end
+    end
+    return true
+end
+
+-- check if measurements are within acceptable time window
+local function measurementsInTimeWindow()
+    local oldest = math.huge
+    local newest = 0
+
+    for _, timestamp in pairs(measurements.timestamps) do
+        oldest = math.min(oldest, timestamp)
+        newest = math.max(newest, timestamp)
+    end
+
+    return (newest - oldest) <= CONFIG.MAX_AGE_MS
+end
+
+-- read function data, perform action depending on logic
+local function handleMessage(topic, payload)
+    local fun = topicMap[topic]
+    if fun == nil then
+        return
+    end
+
+    local data = json:decode(payload)
+    local timestamp = edge:time() -- current time in ms
+
+    -- Store measurement with timestamp
+    local measurementType = fun.meta["lora_type"]
+    measurements.data[measurementType] = data.value
+    measurements.timestamps[measurementType] = timestamp
+
+
+    -- Clean any old measurements
+    cleanOldMeasurements()
+
+    -- Check if we have all required measurements within time window
+    if hasAllMeasurements() and measurementsInTimeWindow() then
+        local eui = fun.meta["eui"]
+        local airTemp = measurements.data["air_temperature"]
+        local humidity = measurements.data["air_humidity"]
+        local surfaceTemp = measurements.data["surface_temperature"]
+        local headTemp = measurements.data["head_temperature"]
+
+        local dewPointData, forstRiskData = processWeatherData(airTemp, humidity, surfaceTemp, headTemp)
+
+        -- Publish each result to its respective topic
+        publishResult(eui, CONFIG.PUBLISH_TOPICS.dewPoint, dewPointData)
+        publishResult(eui, CONFIG.PUBLISH_TOPICS.frostPrecipitation, forstRiskData)
+
+        -- Clear processed measurements
+        measurements.data = {}
+        measurements.timestamps = {}
+    end
+end
+
+
+
+-- when new values arrive on filtered topics
+function onFunctionsUpdated()
+    -- First, unsubscribe from all existing topics
+    for topic, _ in pairs(topicMap) do
+        mq:unsub(topic)
+    end
+
+    -- clear map
+    topicMap = {}
+
+    -- find specified functions using filters in cfg
+    local funs = edge.findFunctions(cfg.functions)
+    -- for each function
+    for _, fun in ipairs(funs) do
+        -- check metadata
+        for k, v in pairs(fun.meta) do
+            -- look for topic_read, store topic and subscribe
+            if k:sub(1, #"topic_read") == "topic_read" then
+                topicMap[v] = fun
+                mq:sub(v, 0)
+            end
+        end
+    end
+end
+
+function onStart()
+    createFunctions()
+    mq:bind("#", handleMessage)
+    onFunctionsUpdated()
 end
