@@ -1,5 +1,3 @@
-local createFunction = false
-local devices = {}
 local topicMap = {}
 local CONFIG = {
     DECODER_NAME = "decentlab.dlwrm",
