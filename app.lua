@@ -57,11 +57,11 @@ local function createFunctions()
                     type = topic,
                     installation_id = app.installation_id,
                     meta = {
-                        device_id = tostring(dev.id),
-                        eui = dev.meta.eui,
-                        name = string.format('%s - %s', dev.meta.eui, topic),
-                        topic_read = string.format('obj/lora/%s/%s', dev.meta.eui, topic)
-
+                        device_id  = tostring(dev.id),
+                        eui        = dev.meta.eui,
+                        name       = string.format('%s - %s', dev.meta.eui, topic),
+                        topic_read = string.format('obj/lora/%s/%s', dev.meta.eui, topic),
+                        app_id     = app.id
                     }
                 }
                 if topic == "dew_point" then
@@ -242,4 +242,15 @@ function onStart()
     createFunctions()
     mq:bind("#", handleMessage)
     onFunctionsUpdated()
+end
+
+-- delete functions when edge app
+function onDestroy()
+    local funs = edge.findFunctions({ app_id = app.id })
+    for _, fun in ipairs(funs) do
+        if fun ~= nil then
+            print("deleting", fun.id)
+            lynx.deleteFunction(fun.id)
+        end
+    end
 end
