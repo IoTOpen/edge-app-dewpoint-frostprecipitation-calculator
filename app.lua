@@ -1,8 +1,8 @@
-local topicMap = {}
+local topicMap = {} -- stores topics used for reading and publishing
 local CONFIG = {
     DECODER_NAME = "decentlab.dlwrm",
     -- Maximum age of measurements to consider valid (in milliseconds)
-    MAX_AGE_MS = 10000 * 1, -- 5 minutes
+    MAX_AGE_MS = 120000, -- 2min
     REQUIRED_MEASUREMENTS = {
         "air_temperature",
         "air_humidity",
@@ -26,20 +26,19 @@ local measurements = {
     timestamps = {}
 }
 
--- get all functions with type value-transformer, if 0 create call createFucntions
+-- check if necessary output functions exist on devices
 local function checkIfFunctionExist(eui, topic)
-    print("check if finction exist on device", string.format('obj/lora/%s/%s', eui, topic))
+    print("check if function exist on device", string.format('obj/lora/%s/%s', eui, topic))
     local functions = lynx.getFunctions({
         topic_read = string.format('obj/lora/%s/%s', eui, topic)
     })
     if #functions > 0 then
         return true
     end
-    print("false")
     return false
 end
 
-
+-- create necessary functions on devices
 local function createFunctions()
     devs = edge.findDevices({ ["lora_manager.decoder_name"] = "decentlab.dlwrm" })
 
@@ -127,17 +126,6 @@ local function processWeatherData(airTemp, humidity, surfaceTemp)
     return dewPointData, frostRiskData
 end
 
--- function to publish a single result
-local function publishResult(eui, topicTemplate, data)
-    local topic = string.format(topicTemplate, eui)
-    local payload = json:encode({
-        value = data.val,
-        msg = data.msg,
-        timestamp = edge:time()
-    })
-    mq:pub(topic, payload, false, 0)
-end
-
 -- Helper function to clean old measurements
 local function cleanOldMeasurements()
     local now = edge:time() -- current time in ms
@@ -172,6 +160,17 @@ local function measurementsInTimeWindow()
     return (newest - oldest) <= CONFIG.MAX_AGE_MS
 end
 
+-- function to publish a single result
+local function publishResult(eui, topicTemplate, data)
+    local topic = string.format(topicTemplate, eui)
+    local payload = json:encode({
+        value = data.val,
+        msg = data.msg,
+        timestamp = edge:time()
+    })
+    mq:pub(topic, payload, false, 0)
+end
+
 -- read function data, perform action depending on logic
 local function handleMessage(topic, payload)
     local fun = topicMap[topic]
@@ -197,11 +196,10 @@ local function handleMessage(topic, payload)
         local airTemp = measurements.data["air_temperature"]
         local humidity = measurements.data["air_humidity"]
         local surfaceTemp = measurements.data["surface_temperature"]
-        local headTemp = measurements.data["head_temperature"]
+        local headTemp = measurements.data["head_temperature"] -- not currently used, can be in the future
+        local dewPointData, forstRiskData = processWeatherData(airTemp, humidity, surfaceTemp)
 
-        local dewPointData, forstRiskData = processWeatherData(airTemp, humidity, surfaceTemp, headTemp)
-
-        -- Publish each result to its respective topic
+        -- Publish each result to its respective topic obj/lora/<eui>/<topic>
         publishResult(eui, CONFIG.PUBLISH_TOPICS.dewPoint, dewPointData)
         publishResult(eui, CONFIG.PUBLISH_TOPICS.frostPrecipitation, forstRiskData)
 
@@ -211,7 +209,14 @@ local function handleMessage(topic, payload)
     end
 end
 
-
+-- find necessary functions
+function findFunctions()
+    funs = {}
+    for _, t in ipairs(CONFIG.REQUIRED_MEASUREMENTS) do
+        table.insert(funs, edge.findFunction({ lora_type = t }))
+    end
+    return funs
+end
 
 -- when new values arrive on filtered topics
 function onFunctionsUpdated()
@@ -223,18 +228,13 @@ function onFunctionsUpdated()
     -- clear map
     topicMap = {}
 
-    -- find specified functions using filters in cfg
-    local funs = edge.findFunctions(cfg.functions)
+    -- find specified functions
+    local funs = findFunctions()
     -- for each function
     for _, fun in ipairs(funs) do
-        -- check metadata
-        for k, v in pairs(fun.meta) do
-            -- look for topic_read, store topic and subscribe
-            if k:sub(1, #"topic_read") == "topic_read" then
-                topicMap[v] = fun
-                mq:sub(v, 0)
-            end
-        end
+        tr = fun.meta.topic_read
+        topicMap[tr] = fun
+        mq:sub(tr, 0)
     end
 end
 
@@ -249,7 +249,7 @@ function onDestroy()
     local funs = edge.findFunctions({ app_id = app.id })
     for _, fun in ipairs(funs) do
         if fun ~= nil then
-            print("deleting", fun.id)
+            print("deleting function", fun.id)
             lynx.deleteFunction(fun.id)
         end
     end
