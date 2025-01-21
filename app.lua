@@ -60,7 +60,7 @@ local function createFunctions()
                         eui        = dev.meta.eui,
                         name       = string.format('%s - %s', dev.meta.eui, topic),
                         topic_read = string.format('obj/lora/%s/%s', dev.meta.eui, topic),
-                        app_id     = app.id
+                        app_id     = tostring(app.id)
                     }
                 }
                 if topic == "dew_point" then
