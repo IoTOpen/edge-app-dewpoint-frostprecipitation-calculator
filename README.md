@@ -11,7 +11,10 @@ head_temperature*
 
 ### Dewpoint
 Dewpoint is calcualted using Magnus formula:
-$$ γ = ((17.27 * T) / (237.7 + T)) + ln(RH/100)\\ Td = (237.7 * γ) / (17.27 - γ)$$
+
+$$ γ = ((17.27 * T) / (237.7 + T)) + ln(RH/100) $$\
+$$ Td = (237.7 * γ) / (17.27 - γ)$$
+
 T = Air temperature in °C\
 RH = Air humidity in %\
 Td = Dew point temperature in °C
