@@ -1,19 +1,32 @@
 # edge-app-dewpoint-frostprecipitation-calculator
-edge app to calculate dewpoint and frost precipitation using data from DL-WRM2.
+edge app to calculate dewpoint and frost precipitation using data from DL-WRM002.
 
+#### Input sensor data:
+air_temperature
+air_humidity
+surface_temperature
+head_temperature*
+
+\*head_temperature is not currently being used in the app. It is included if the logic of the app would need to be expanded in the future.
 
 ### Dewpoint
 Dewpoint is calcualted using Magnus formula:
 
-γ = ((17.27 * T) / (237.7 + T)) + ln(RH/100)\
-Td = (237.7 * γ) / (17.27 - γ)
+$$ γ = ((17.27 * T) / (237.7 + T)) + ln(RH/100) $$\
+$$ Td = (237.7 * γ) / (17.27 - γ)$$
 
-Where:
 T = Air temperature in °C\
-RH = Relative humidity in %\
+RH = Air humidity in %\
 Td = Dew point temperature in °C
 
+Constants being used:
+a = 17.27
+b = 237.7
+
+[Reference](https://en.wikipedia.org/wiki/Dew_point)
+#### Code:
 ```lua
+    -- Constants for Magnus formula
     local a = 17.27
     local b = 237.7
     -- Calculate gamma term
@@ -26,7 +39,7 @@ Td = Dew point temperature in °C
 ### Frost Precipitation
 Logic for calculating frost precipitation, make use of calculated dew point and surface temperature.
 
-0 = No possibility of frost\
+0 = No frost\
 1 = Frost is possible
 
 ```lua
