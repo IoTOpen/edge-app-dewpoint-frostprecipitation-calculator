@@ -125,7 +125,6 @@ end
 
 -- function to publish a single result
 local function publishResult(eui, topicTemplate, data)
-    print("publish")
     local topic = string.format(topicTemplate, eui)
     local payload = json:encode({
         value = data.val,
