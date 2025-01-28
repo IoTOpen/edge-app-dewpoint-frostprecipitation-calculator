@@ -1,11 +1,11 @@
 # edge-app-dewpoint-frostprecipitation-calculator
 edge app to calculate dewpoint and frost precipitation.
-Users choose what devices and functions to included, if not necessary input data is included the calculation wont work.
+Users choose for what devices calculations to be made and what functions to include. If not necessary input data is included the calculation wont work.
 
 #### Necessary Input sensor data:
-air_temperature
-air_humidity
-surface_temperature
+air_temperature (or similar) = <em>temperature in the air</em>
+air_humidity (or similar) = <em>humidity in the air</em>
+surface_temperature (or similar) = <em>temperature of the surface we want to check for frost. </em>
 
 
 ### Dewpoint
@@ -37,6 +37,10 @@ b = 237.7
 
 ### Frost Precipitation
 Logic for calculating frost precipitation, make use of calculated dew point and surface temperature.
+
+If the surface temperature is below freezing and below dew point then we can assume there is a risk for frost. Otherwise we assume there is no risk or very unlikely.
+
+#### Code
 
 0 = No frost\
 1 = Frost is possible
