@@ -137,10 +137,8 @@ end
 
 -- read function data, perform action depending on logic
 local function handleMessage(topic, payload)
-    print("handleMessage", topic)
     local fun = topicFunctionMap[topic]
     if fun == nil then
-        print("return")
         return
     end
 
@@ -154,7 +152,6 @@ local function handleMessage(topic, payload)
 
     -- Check if we have all required measurements to calculate
     if hasAllMeasurements(eui) then
-        print("have every measurment!")
         local airTemp = ""
         local humidity = ""
         local surfaceTemp = ""
@@ -166,7 +163,6 @@ local function handleMessage(topic, payload)
             elseif string.find(key, "air_temp") or string.match(key, "^temperature$") then
                 airTemp = value
             end
-            print("set to false", eui, key)
             measurements[eui].data[key] = false -- reset value after storing it
         end
         local dewPointData, forstRiskData = processWeatherData(airTemp, humidity, surfaceTemp)
@@ -182,7 +178,6 @@ end
 
 -- find necessary functions
 function findFunctions()
-    print("find function")
     local funs = {}
 
     -- Iterate through each EUI and its measurements
