@@ -1,5 +1,36 @@
 {
     "author": "IoT Open",
     "license": "MIT",
-    "input": {}
+    "input": {
+        "devices": {
+            "required": true,
+            "name": "Devices",
+            "description": "Devices that should have dew point calculated on",
+            "type": "multi_device_selector"
+        },
+        "functions": {
+            "required": true,
+            "name": "Trigger functions",
+            "description": "These functions will be covered by this temperature alarm. Only functions of the type 'temperature' is shown",
+            "type": "multi_function_selector",
+            "filter": {
+                "type": [
+                    "temperature",
+                    "humidity",
+                    "ext_temperature"
+                ]
+            }
+        }
+    },
+    "guide": [
+        {
+            "id": "stage_1",
+            "title": "Configuration",
+            "description": "Choose the devices which should have dew point and frost precipitation calculated. OBS! They need to have these 3 functions: Temperature(air), Humidity and Surface Temperature. Names of these functions may differ depending on what sensor is being used.",
+            "input_fields": [
+                "devices",
+                "functions"
+            ]
+        }
+    ]
 }

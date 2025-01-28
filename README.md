@@ -1,13 +1,12 @@
 # edge-app-dewpoint-frostprecipitation-calculator
-edge app to calculate dewpoint and frost precipitation using data from DL-WRM002.
+edge app to calculate dewpoint and frost precipitation.
+Users choose what devices and functions to included, if not necessary input data is included the calculation wont work.
 
-#### Input sensor data:
+#### Necessary Input sensor data:
 air_temperature
 air_humidity
 surface_temperature
-head_temperature*
 
-\*head_temperature is not currently being used in the app. It is included if the logic of the app would need to be expanded in the future.
 
 ### Dewpoint
 Dewpoint is calcualted using Magnus formula:
