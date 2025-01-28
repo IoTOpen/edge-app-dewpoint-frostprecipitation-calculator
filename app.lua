@@ -163,7 +163,7 @@ local function handleMessage(topic, payload)
                 surfaceTemp = value
             elseif string.find(key, "humid") then
                 humidity = value
-            elseif string.find(key, "air_temp") or string.match(key, "temperature") then
+            elseif string.find(key, "air_temp") or string.match(key, "^temperature$") then
                 airTemp = value
             end
             print("set to false", eui, key)
