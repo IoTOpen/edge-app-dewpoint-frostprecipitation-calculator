@@ -1,6 +1,6 @@
 # edge-app-dewpoint-frostprecipitation-calculator
 edge app to calculate dewpoint and frost precipitation.
-Users choose for what devices calculations should be made and what functions to be used for calculations. <strong>If not necessary input data is included the calculation wont work.</strong> The edge-app will filter out functions it doesn't think are needed. If this app is used with another sensors then Decentlab or Elsys this might need to be updated.
+Users choose for what devices calculations should be made and what functions to be used for calculations. <strong>If not necessary input data is included the calculation wont work.</strong> When setting up the app, functions it doesn't think are needed will be filtered out. If this app is used with another sensors then Decentlab or Elsys this might need to be updated.
 
 #### Necessary Input sensor data:
 air_temperature (or similar) = <em>temperature in the air</em>\
