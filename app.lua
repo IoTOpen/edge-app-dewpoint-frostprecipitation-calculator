@@ -1,34 +1,25 @@
-local topicMap = {} -- stores topics used for reading and publishing
 local CONFIG = {
-    DECODER_NAME = "decentlab.dlwrm",
-    -- Maximum age of measurements to consider valid (in milliseconds)
-    MAX_AGE_MS = 120000, -- 2min
-    REQUIRED_MEASUREMENTS = {
-        "air_temperature",
-        "air_humidity",
-        "surface_temperature",
-        "head_temperature"
-    },
     -- Topics for publishing results
     PUBLISH_TOPICS = {
         dewPoint = "obj/lora/%s/dew_point",
         frostPrecipitation = "obj/lora/%s/frost_precipitation"
+    },
+    -- type of output function
+    OUTPUT_FUNCTIONS_TYPE = {
+        "dew_point",
+        "frost_precipitation"
     }
 }
 
-local measurements = {
-    data = {
-        air_temperature = nil,
-        air_humidity = nil,
-        surface_temperature = nil,
-        head_temperature = nil
-    },
-    timestamps = {}
-}
+local requiredMeasurements = {} -- contains functions that will be read
+local topicFunctionMap = {}     -- stores function data and metadata
+local measurements = {}         -- stores measurement data from fucntions
+
+
 
 -- check if necessary output functions exist on devices
 local function checkIfFunctionExist(eui, topic)
-    print("check if function exist on device", string.format('obj/lora/%s/%s', eui, topic))
+    print("function exist on device", string.format('obj/lora/%s/%s', eui, topic))
     local functions = lynx.getFunctions({
         topic_read = string.format('obj/lora/%s/%s', eui, topic)
     })
@@ -39,31 +30,27 @@ local function checkIfFunctionExist(eui, topic)
 end
 
 -- create necessary functions on devices
-local function createFunctions()
-    devs = edge.findDevices({ ["lora_manager.decoder_name"] = "decentlab.dlwrm" })
-
-    topics = {
-        "dew_point",
-        "frost_precipitation"
-    }
+local function createOutputFunctions()
+    print("create function")
+    devs = edge.findDevices(cfg.devices) -- use the devices selected by user
     -- Loop trough devices
     for _, dev in ipairs(devs) do
-        -- for each topic create function
-        for _, topic in ipairs(topics) do
-            if checkIfFunctionExist(dev.meta.eui, topic) == false then
-                print("creating function", topic, dev)
+        -- for each output funcition type create a new function
+        for _, outFun in ipairs(CONFIG.OUTPUT_FUNCTIONS_TYPE) do
+            if checkIfFunctionExist(dev.meta.eui, outFun) == false then
+                print("creating function", outFun, dev)
                 local fn = {
-                    type = topic,
+                    type = outFun,
                     installation_id = app.installation_id,
                     meta = {
                         device_id  = tostring(dev.id),
                         eui        = dev.meta.eui,
-                        name       = string.format('%s - %s', dev.meta.eui, topic),
-                        topic_read = string.format('obj/lora/%s/%s', dev.meta.eui, topic),
+                        name       = string.format('%s - %s', dev.meta.eui, outFun),
+                        topic_read = string.format('obj/lora/%s/%s', dev.meta.eui, outFun),
                         app_id     = tostring(app.id)
                     }
                 }
-                if topic == "dew_point" then
+                if outFun == "dew_point" then
                     fn.meta.unit = "°C"
                     fn.meta.format = "%.1f°C"
                 end
@@ -97,12 +84,12 @@ local function checkFrostPrecipitation(surfaceTemp, dewPoint)
         -- Check if surface temperature is below dew point
         if surfaceTemp <= dewPoint then
             result.isFrostPossible = 1 -- true
-            result.reason = "Surface temperature is below both freezing and dew point"
+            result.reason = "Risk for frost! Surface temperature is below both freezing and dew point"
         else
             result.reason = "Surface temperature is below freezing but above dew point"
         end
     else
-        result.reason = "Surface temperature is above freezing"
+        result.reason = "No risk for frost. Surface temperature is above freezing"
     end
 
     return result
@@ -126,42 +113,19 @@ local function processWeatherData(airTemp, humidity, surfaceTemp)
     return dewPointData, frostRiskData
 end
 
--- Helper function to clean old measurements
-local function cleanOldMeasurements()
-    local now = edge:time() -- current time in ms
-    for topic, timestamp in pairs(measurements.timestamps) do
-        if (now - timestamp) > CONFIG.MAX_AGE_MS then
-            measurements.data[topic] = nil
-            measurements.timestamps[topic] = nil
-        end
-    end
-end
-
 -- function to check if we have all required measurements
-local function hasAllMeasurements()
-    for _, measurement in ipairs(CONFIG.REQUIRED_MEASUREMENTS) do
-        if measurements.data[measurement] == nil then
+local function hasAllMeasurements(eui)
+    for _, m in ipairs(requiredMeasurements[eui]) do
+        if measurements[eui].data[m] == false then
             return false
         end
     end
     return true
 end
 
--- check if measurements are within acceptable time window
-local function measurementsInTimeWindow()
-    local oldest = math.huge
-    local newest = 0
-
-    for _, timestamp in pairs(measurements.timestamps) do
-        oldest = math.min(oldest, timestamp)
-        newest = math.max(newest, timestamp)
-    end
-
-    return (newest - oldest) <= CONFIG.MAX_AGE_MS
-end
-
 -- function to publish a single result
 local function publishResult(eui, topicTemplate, data)
+    print("publish")
     local topic = string.format(topicTemplate, eui)
     local payload = json:encode({
         value = data.val,
@@ -173,30 +137,38 @@ end
 
 -- read function data, perform action depending on logic
 local function handleMessage(topic, payload)
-    local fun = topicMap[topic]
+    print("handleMessage", topic)
+    local fun = topicFunctionMap[topic]
     if fun == nil then
+        print("return")
         return
     end
 
     local data = json:decode(payload)
     local timestamp = edge:time() -- current time in ms
-
+    local eui = fun.meta["eui"]
     -- Store measurement with timestamp
     local measurementType = fun.meta["lora_type"]
-    measurements.data[measurementType] = data.value
-    measurements.timestamps[measurementType] = timestamp
+    measurements[eui].data[measurementType] = data.value
+    measurements[eui].timestamps[measurementType] = timestamp
 
-
-    -- Clean any old measurements
-    cleanOldMeasurements()
-
-    -- Check if we have all required measurements within time window
-    if hasAllMeasurements() and measurementsInTimeWindow() then
-        local eui = fun.meta["eui"]
-        local airTemp = measurements.data["air_temperature"]
-        local humidity = measurements.data["air_humidity"]
-        local surfaceTemp = measurements.data["surface_temperature"]
-        local headTemp = measurements.data["head_temperature"] -- not currently used, can be in the future
+    -- Check if we have all required measurements to calculate
+    if hasAllMeasurements(eui) then
+        print("have every measurment!")
+        local airTemp = ""
+        local humidity = ""
+        local surfaceTemp = ""
+        for key, value in pairs(measurements[eui].data) do
+            if string.find(key, "surface") or string.find(key, "ext_temp") then
+                surfaceTemp = value
+            elseif string.find(key, "humid") then
+                humidity = value
+            elseif string.find(key, "air_temp") or string.match(key, "temperature") then
+                airTemp = value
+            end
+            print("set to false", eui, key)
+            measurements[eui].data[key] = false -- reset value after storing it
+        end
         local dewPointData, forstRiskData = processWeatherData(airTemp, humidity, surfaceTemp)
 
         -- Publish each result to its respective topic obj/lora/<eui>/<topic>
@@ -204,42 +176,78 @@ local function handleMessage(topic, payload)
         publishResult(eui, CONFIG.PUBLISH_TOPICS.frostPrecipitation, forstRiskData)
 
         -- Clear processed measurements
-        measurements.data = {}
-        measurements.timestamps = {}
+        measurements[eui].timestamps = {}
     end
 end
 
 -- find necessary functions
 function findFunctions()
-    funs = {}
-    for _, t in ipairs(CONFIG.REQUIRED_MEASUREMENTS) do
-        table.insert(funs, edge.findFunction({ lora_type = t }))
+    print("find function")
+    local funs = {}
+
+    -- Iterate through each EUI and its measurements
+    for eui, measurements in pairs(requiredMeasurements) do
+        -- Iterate through each measurement type for this EUI
+        for _, measurementType in ipairs(measurements) do
+            -- Find the function for this measurement type
+            local func = edge.findFunction({ lora_type = measurementType, eui = eui })
+            if func then
+                table.insert(funs, func)
+            end
+        end
     end
     return funs
 end
 
 -- when new values arrive on filtered topics
 function onFunctionsUpdated()
+    print("update function")
     -- First, unsubscribe from all existing topics
-    for topic, _ in pairs(topicMap) do
+    for topic, _ in pairs(topicFunctionMap) do
+        print("unsub from", topic)
         mq:unsub(topic)
     end
 
     -- clear map
-    topicMap = {}
+    topicFunctionMap = {}
 
-    -- find specified functions
+    -- get selected functions
     local funs = findFunctions()
-    -- for each function
+    -- subscribe to each function
     for _, fun in ipairs(funs) do
         tr = fun.meta.topic_read
-        topicMap[tr] = fun
+        topicFunctionMap[tr] = fun
+        print("subsribe to: ", tr)
         mq:sub(tr, 0)
     end
 end
 
+function getInputFunctions()
+    print("getInputFunctions")
+    funs = edge.findFunctions(cfg.functions)
+    for _, fun in ipairs(funs) do
+        name = fun.meta["lora_type"]
+        eui = fun.meta["eui"]
+        if not measurements[eui] then
+            measurements[eui] = {
+                data = {},
+                timestamps = {}
+            }
+        end
+        if not requiredMeasurements[eui] then
+            requiredMeasurements[eui] = {}
+        end
+
+        -- Add the measurement requirement for this specific EUI
+        table.insert(requiredMeasurements[eui], name)
+        measurements[eui].data[name] = false
+        measurements[eui].timestamps[name] = os.time() * 1000
+    end
+end
+
 function onStart()
-    createFunctions()
+    getInputFunctions()
+    createOutputFunctions()
     mq:bind("#", handleMessage)
     onFunctionsUpdated()
 end
