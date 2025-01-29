@@ -18,15 +18,16 @@ local measurements = {}         -- stores measurement data from fucntions
 
 
 -- check if necessary output functions exist on devices
-local function checkIfFunctionExist(eui, topic)
+local function shouldFunctionBeCreated(eui, topic)
     print("function exist on device", string.format('obj/lora/%s/%s', eui, topic))
     local functions = lynx.getFunctions({
         topic_read = string.format('obj/lora/%s/%s', eui, topic)
     })
-    if #functions > 0 then
-        return true
+
+    if #functions > 0 then -- if number of functions we looking is more then 0 and input functions is more then 2
+        return false
     end
-    return false
+    return true
 end
 
 -- create necessary functions on devices
@@ -37,8 +38,13 @@ local function createOutputFunctions()
     for _, dev in ipairs(devs) do
         -- for each output funcition type create a new function
         for _, outFun in ipairs(CONFIG.OUTPUT_FUNCTIONS_TYPE) do
-            if checkIfFunctionExist(dev.meta.eui, outFun) == false then
-                print("creating function", outFun, dev)
+            local eui = dev.meta.eui
+            local count = 0
+            for d in pairs(measurements[eui].data) do
+                print(eui, d)
+                count = count + 1
+            end
+            if shouldFunctionBeCreated(dev.meta.eui, outFun) == true and count > 2 then -- check if functions should be created and if there is enough input topics
                 local fn = {
                     type = outFun,
                     installation_id = app.installation_id,
@@ -55,6 +61,7 @@ local function createOutputFunctions()
                     fn.meta.unit = "°C"
                     fn.meta.format = "%.1f°C"
                 end
+                print("creating function", outFun, dev, dev.meta.eui)
                 lynx.createFunction(fn)
             end
         end
