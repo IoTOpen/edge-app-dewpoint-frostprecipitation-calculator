@@ -4,14 +4,14 @@
     "input": {
         "devices": {
             "required": true,
-            "name": "Devices",
-            "description": "Devices that should have dew point calculated on",
+            "name": "Pick devices",
+            "description": "Devices that should have dew point and frost precipitation calculated on",
             "type": "multi_device_selector"
         },
         "functions": {
             "required": true,
-            "name": "Trigger functions",
-            "description": "These functions will be covered by this temperature alarm. Only functions of the type 'temperature' is shown",
+            "name": "Pick functions, three is needed for each device",
+            "description": "Pick functions to use for calculations. To know which function to select, use the eui in the the device name to find the corresponding function, function has device eui in name.",
             "type": "multi_function_selector",
             "filter": {
                 "type": [
@@ -26,7 +26,7 @@
         {
             "id": "stage_1",
             "title": "Configuration",
-            "description": "Choose the devices which should have dew point and frost precipitation calculated. OBS! They need to have these 3 functions: Temperature(air), Humidity and Surface Temperature. Names of these functions may differ depending on what sensor is being used.",
+            "description": "Choose the devices which should have dew point and frost precipitation calculated. These 3 function need to be selected for each device: Temperature(air), Humidity and Surface Temperature. Function names may differ depending on what sensor is being used. Use the eui in the device name to match which functions to use.",
             "input_fields": [
                 "devices",
                 "functions"
