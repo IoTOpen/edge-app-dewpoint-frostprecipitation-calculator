@@ -47,7 +47,8 @@ local function createOutputFunctions()
                         eui        = dev.meta.eui,
                         name       = string.format('%s - %s', dev.meta.eui, outFun),
                         topic_read = string.format('obj/lora/%s/%s', dev.meta.eui, outFun),
-                        app_id     = tostring(app.id)
+                        app_id     = tostring(app.id),
+                        lora_type  = outFun
                     }
                 }
                 if outFun == "dew_point" then
