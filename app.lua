@@ -14,8 +14,7 @@ local CONFIG = {
 local requiredMeasurements = {} -- contains functions that will be read
 local topicFunctionMap = {}     -- stores function data and metadata
 local measurements = {}         -- stores measurement data from fucntions
-
-
+local lastFrostState = {}
 
 -- check if necessary output functions exist on devices
 local function shouldFunctionBeCreated(eui, topic)
@@ -77,27 +76,45 @@ local function calculateDewPoint(airTemp, relativeHumidity)
     local gamma = ((a * airTemp) / (b + airTemp)) + math.log(relativeHumidity / 100.0)
     -- Calculate dew point
     local dewPoint = (b * gamma) / (a - gamma)
+    -- round to 1 decimal place
+    dewPoint = math.floor(dewPoint * 10 + 0.5) / 10
     return dewPoint
 end
 
 -- Function to check for frost precipitation conditions
 local function checkFrostPrecipitation(surfaceTemp, dewPoint)
     local result = {
-        isFrostPossible = 0, -- false
-        reason = "",
+        isFrostPossible = 0,
+        reason = ""
     }
 
-    -- Check if surface temperature is below freezing
+    -- 2°C margin accounts for:
+    -- 1. Sensor accuracy (±0.5°C)
+    -- 2. Microclimate variations (±1°C)
+    -- 3. Ground temperature variations (can be up to 2°C cooler than air)
+    local margin = 2.0
+
     if surfaceTemp <= 0 then
-        -- Check if surface temperature is below dew point
-        if surfaceTemp <= dewPoint then
-            result.isFrostPossible = 1 -- true
-            result.reason = "Risk for frost! Surface temperature is below both freezing and dew point"
+        if surfaceTemp <= (dewPoint + margin) then
+            result.isFrostPossible = 1
+            result.reason = string.format(
+                "Risk for frost! Surface temperature (%.1f°C) is below freezing and within %.1f°C of dew point (%.1f°C)",
+                surfaceTemp,
+                margin,
+                dewPoint
+            )
         else
-            result.reason = "Surface temperature is below freezing but above dew point"
+            result.reason = string.format(
+                "Low frost risk. Surface temperature (%.1f°C) is well above dew point (%.1f°C)",
+                surfaceTemp,
+                dewPoint
+            )
         end
     else
-        result.reason = "No risk for frost. Surface temperature is above freezing"
+        result.reason = string.format(
+            "No risk for frost. Surface temperature (%.1f°C) is above freezing",
+            surfaceTemp
+        )
     end
 
     return result
@@ -151,18 +168,18 @@ local function handleMessage(topic, payload)
 
     local data = json:decode(payload)
     local timestamp = edge:time() -- current time in ms
-    local eui = fun.meta["eui"]
+    local devEui = fun.meta["eui"]
     -- Store measurement with timestamp
     local measurementType = fun.meta["lora_type"]
-    measurements[eui].data[measurementType] = data.value
-    measurements[eui].timestamps[measurementType] = timestamp
+    measurements[devEui].data[measurementType] = data.value
+    measurements[devEui].timestamps[measurementType] = timestamp
 
     -- Check if we have all required measurements to calculate
-    if hasAllMeasurements(eui) then
+    if hasAllMeasurements(devEui) then
         local airTemp = ""
         local humidity = ""
         local surfaceTemp = ""
-        for key, value in pairs(measurements[eui].data) do
+        for key, value in pairs(measurements[devEui].data) do
             if string.find(key, "surface") or string.find(key, "ext_temp") then
                 surfaceTemp = value
             elseif string.find(key, "humid") then
@@ -170,16 +187,38 @@ local function handleMessage(topic, payload)
             elseif string.find(key, "air_temp") or string.match(key, "^temperature$") then
                 airTemp = value
             end
-            measurements[eui].data[key] = false -- reset value after storing it
+            measurements[devEui].data[key] = false -- reset value after storing it
         end
         local dewPointData, forstRiskData = processWeatherData(airTemp, humidity, surfaceTemp)
 
-        -- Publish each result to its respective topic obj/lora/<eui>/<topic>
-        publishResult(eui, CONFIG.PUBLISH_TOPICS.dewPoint, dewPointData)
-        publishResult(eui, CONFIG.PUBLISH_TOPICS.frostPrecipitation, forstRiskData)
+        -- Always publish dew point
+        publishResult(devEui, CONFIG.PUBLISH_TOPICS.dewPoint, dewPointData)
+        publishResult(devEui, CONFIG.PUBLISH_TOPICS.frostPrecipitation, forstRiskData)
 
         -- Clear processed measurements
-        measurements[eui].timestamps = {}
+        measurements[devEui].timestamps = {}
+        if lastFrostState[devEui] ~= forstRiskData.val then -- if value has toggled
+            -- store new value
+            lastFrostState[devEui] = forstRiskData.val
+            if forstRiskData.val == 1 then -- only send notification if frost risk is present
+                device = edge.findDevice({ eui = devEui })
+
+                -- send notification for change
+                local notifyPayload = {
+                    device_name = device.meta.name,
+                    device_id = device.id,
+                    device_eui = devEui,
+                    humidity = humidity,
+                    air_temperature = airTemp,
+                    surface_temperature = surfaceTemp,
+                    dew_point = dewPointData.val,
+                    value = forstRiskData.val,
+                    msg = forstRiskData.msg,
+                    timestamp = edge:time()
+                }
+                lynx.notify(cfg.notification_output, notifyPayload)
+            end
+        end
     end
 end
 
