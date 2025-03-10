@@ -82,37 +82,43 @@ local function calculateDewPoint(airTemp, relativeHumidity)
 end
 
 -- Function to check for frost precipitation conditions
-local function checkFrostPrecipitation(surfaceTemp, dewPoint)
+-- https://www.weather.gov/source/zhu/ZHU_Training_Page/fog_stuff/Dew_Frost/Dew_Frost.htm
+local function checkFrostPrecipitation(surfaceTemp, dewPoint, airTemp)
     local result = {
         isFrostPossible = 0,
         reason = ""
     }
 
-    -- 2°C margin accounts for:
-    -- 1. Sensor accuracy (±0.5°C)
-    -- 2. Microclimate variations (±1°C)
-    -- 3. Ground temperature variations (can be up to 2°C cooler than air)
-    local margin = 2.0
+    -- No frost risk if surface temperature is above freezing
+    if surfaceTemp > 0 then
+        result.reason = string.format(
+            "No frost risk. Surface temperature (%.1f°C) is above freezing",
+            surfaceTemp
+        )
+        return result
+    end
 
-    if surfaceTemp <= 0 then
-        if surfaceTemp <= (dewPoint + margin) then
-            result.isFrostPossible = 1
-            result.reason = string.format(
-                "Risk for frost! Surface temperature (%.1f°C) is below freezing and within %.1f°C of dew point (%.1f°C)",
-                surfaceTemp,
-                margin,
-                dewPoint
-            )
-        else
-            result.reason = string.format(
-                "Low frost risk. Surface temperature (%.1f°C) is well above dew point (%.1f°C)",
-                surfaceTemp,
-                dewPoint
-            )
-        end
+    -- Calculate moisture availability (difference between air temperature and dew point)
+    local moistureAvailability = airTemp - dewPoint
+
+    -- High risk: freezing + high humidity/close dew point
+    if moistureAvailability < 1.0 then
+        result.isFrostPossible = 1
+        result.reason = string.format(
+            "High frost risk! Surface temperature (%.1f°C) is below freezing with high moisture availability (dew point %.1f°C)",
+            surfaceTemp, dewPoint
+        )
+        -- Medium risk: freezing but moderate humidity
+    elseif moistureAvailability < 3.0 then
+        result.isFrostPossible = 1
+        result.reason = string.format(
+            "Moderate frost risk. Surface temperature (%.1f°C) is below freezing with moderate moisture availability",
+            surfaceTemp
+        )
+        -- Low/no risk: freezing but dry conditions
     else
         result.reason = string.format(
-            "No risk for frost. Surface temperature (%.1f°C) is above freezing",
+            "Minimal frost risk. Surface temperature (%.1f°C) is below freezing but conditions are too dry for significant frost",
             surfaceTemp
         )
     end
@@ -122,7 +128,7 @@ end
 
 local function processWeatherData(airTemp, humidity, surfaceTemp)
     local dewPoint = calculateDewPoint(airTemp, humidity)
-    local frostResult = checkFrostPrecipitation(surfaceTemp, dewPoint)
+    local frostResult = checkFrostPrecipitation(surfaceTemp, dewPoint, airTemp)
 
     -- Prepare return data structures
     local dewPointData = {
@@ -198,14 +204,16 @@ local function handleMessage(topic, payload)
         -- Clear processed measurements
         measurements[devEui].timestamps = {}
         if lastFrostState[devEui] ~= forstRiskData.val then -- if value has toggled
+            print("frost state has changed: ", devEui, " from ", lastFrostState[devEui], " to ", forstRiskData.val)
             -- store new value
             lastFrostState[devEui] = forstRiskData.val
-            if forstRiskData.val == 1 then -- only send notification if frost risk is present
+            if lastFrostState[devEui] == 1 then -- only send notification if frost risk is present
                 device = edge.findDevice({ eui = devEui })
 
-                -- send notification for change
+
                 local notifyPayload = {
                     device_name = device.meta.name,
+                    wrm_grafana_name = device.meta.WRM_grafana_name,
                     device_id = device.id,
                     device_eui = devEui,
                     humidity = humidity,
@@ -216,6 +224,8 @@ local function handleMessage(topic, payload)
                     msg = forstRiskData.msg,
                     timestamp = edge:time()
                 }
+                print(os.date("%Y-%m-%d %H:%M:%S", notifyPayload.timestamp), " Sending notification for device", devEui,
+                    "with data", json:encode(notifyPayload))
                 lynx.notify(cfg.notification_output, notifyPayload)
             end
         end
@@ -226,14 +236,24 @@ end
 function findFunctions()
     local funs = {}
 
+    -- First, get all the selected device EUIs from cfg.devices
+    local selectedDeviceEUIs = {}
+    local devs = edge.findDevices(cfg.devices)
+    for _, dev in ipairs(devs) do
+        selectedDeviceEUIs[dev.meta.eui] = true
+    end
+
     -- Iterate through each EUI and its measurements
     for eui, measurements in pairs(requiredMeasurements) do
-        -- Iterate through each measurement type for this EUI
-        for _, measurementType in ipairs(measurements) do
-            -- Find the function for this measurement type
-            local func = edge.findFunction({ lora_type = measurementType, eui = eui })
-            if func then
-                table.insert(funs, func)
+        -- Only process if this EUI belongs to a selected device
+        if selectedDeviceEUIs[eui] then
+            -- Iterate through each measurement type for this EUI
+            for _, measurementType in ipairs(measurements) do
+                -- Find the function for this measurement type
+                local func = edge.findFunction({ lora_type = measurementType, eui = eui })
+                if func then
+                    table.insert(funs, func)
+                end
             end
         end
     end
@@ -258,7 +278,7 @@ function onFunctionsUpdated()
     for _, fun in ipairs(funs) do
         tr = fun.meta.topic_read
         topicFunctionMap[tr] = fun
-        print("subsribe to: ", tr)
+        print("subscribe to: ", tr)
         mq:sub(tr, 0)
     end
 end
@@ -287,19 +307,10 @@ function getInputFunctions()
 end
 
 function onStart()
+    local startTime = os.time()
+    print("Edge-app started ", os.date("%Y-%m-%d %H:%M:%S", startTime))
     getInputFunctions()
     createOutputFunctions()
     mq:bind("#", handleMessage)
     onFunctionsUpdated()
-end
-
--- delete functions when edge app
-function onDestroy()
-    local funs = edge.findFunctions({ app_id = app.id })
-    for _, fun in ipairs(funs) do
-        if fun ~= nil then
-            print("deleting function", fun.id)
-            lynx.deleteFunction(fun.id)
-        end
-    end
 end
