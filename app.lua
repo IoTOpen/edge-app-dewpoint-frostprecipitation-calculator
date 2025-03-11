@@ -102,24 +102,24 @@ local function checkFrostPrecipitation(surfaceTemp, dewPoint, airTemp)
     local moistureAvailability = airTemp - dewPoint
 
     -- High risk: freezing + high humidity/close dew point
-    if moistureAvailability < 1.0 then
+    if moistureAvailability <= 1.0 then -- High risk (RH ~90-100%)
         result.isFrostPossible = 1
         result.reason = string.format(
-            "High frost risk! Surface temperature (%.1f°C) is below freezing with high moisture availability (dew point %.1f°C)",
+            "High frost risk! Surface temperature is %.1f°C is below with high moisture availability (dew point %.1f°C)",
             surfaceTemp, dewPoint
         )
         -- Medium risk: freezing but moderate humidity
-    elseif moistureAvailability < 3.0 then
+    elseif moistureAvailability < 3.0 then -- Medium risk (RH ~70-90%)
         result.isFrostPossible = 1
         result.reason = string.format(
-            "Moderate frost risk. Surface temperature (%.1f°C) is below freezing with moderate moisture availability",
-            surfaceTemp
+            "Moderate frost risk. Surface temperature (%.1f°C) is below freezing with moderate moisture availability (dew point %.1f°C)",
+            surfaceTemp, dewPoint
         )
         -- Low/no risk: freezing but dry conditions
-    else
+    else -- Low/no risk (RH <70%)
         result.reason = string.format(
-            "Minimal frost risk. Surface temperature (%.1f°C) is below freezing but conditions are too dry for significant frost",
-            surfaceTemp
+            "Minimal frost risk. Surface temperature (%.1f°C) is below freezing but conditions are too dry for significant frost (dew point %.1f°C)",
+            surfaceTemp, dewPoint
         )
     end
 
