@@ -8,19 +8,13 @@ local CONFIG = {
     OUTPUT_FUNCTIONS_TYPE = {
         "dew_point",
         "frost_precipitation"
-    },
-    -- Add inertia configuration
-    FROST_INERTIA = {
-        REQUIRED_CLEAR_TIME_MS = 1800000, -- 30 minutes in milliseconds
-        MIN_SAMPLES = 3                   -- minimum number of clear samples required
     }
 }
 
 local requiredMeasurements = {} -- contains functions that will be read
 local topicFunctionMap = {}     -- stores function data and metadata
-local measurements = {}         -- stores measurement data from fucntions
+local measurements = {}         -- stores measurement data from functions
 local lastFrostState = {}
-local frostClearTracking = {}   -- tracks consecutive clear conditions per device
 
 -- check if necessary output functions exist on devices
 local function shouldFunctionBeCreated(eui, topic)
@@ -29,10 +23,10 @@ local function shouldFunctionBeCreated(eui, topic)
     })
 
     if #functions > 0 then -- if number of functions we looking is more then 0 and input functions is more then 2
-        print(string.format("Function %s already exist on device", string.format('obj/lora/%s/%s', eui, topic)))
+        print(string.format("Function already exist on device: %s", string.format('obj/lora/%s/%s', eui, topic)))
         return false
     end
-    print(string.format("Function %s is missing on device", string.format('obj/lora/%s/%s', eui, topic)))
+    print(string.format("Function is missing on device: %s", string.format('obj/lora/%s/%s', eui, topic)))
     return true
 end
 
@@ -42,13 +36,13 @@ function CreateOutputFunctions()
     devs = edge.findDevices(cfg.devices) -- use the devices selected by user
     -- Loop trough devices
     for _, dev in ipairs(devs) do
-        -- for each output funcition type create a new function
+        -- for each output function type create a new function
         for _, outFun in ipairs(CONFIG.OUTPUT_FUNCTIONS_TYPE) do
             local eui = dev.meta.eui
             local count = 0
             print("Check if necessary functions was included:")
             for i in pairs(measurements[eui]) do
-                print(eui, i)
+                print(i)
                 count = count + 1
             end
             if shouldFunctionBeCreated(dev.meta.eui, outFun) == true and count > 2 then -- check if functions should be created and if there is enough input topics
@@ -97,7 +91,7 @@ local function checkFrostPrecipitation(surfaceTemp, dewPoint, airTemp)
         reason = ""
     }
 
-    -- No frost risk if surface temperature is well above freezing
+    -- No frost risk if surface temperature is above freezing
     if surfaceTemp > 1 then
         result.reason = string.format(
             "No calculated frost risk. Surface temperature (%.1f°C) is well above threshold",
@@ -109,23 +103,19 @@ local function checkFrostPrecipitation(surfaceTemp, dewPoint, airTemp)
     -- Calculate moisture availability (difference between air temperature and dew point)
     local moistureAvailability = airTemp - dewPoint
 
-    -- High risk: freezing + high humidity/close dew point
     if moistureAvailability <= 1.0 then -- High risk (RH ~90-100%)
         result.isFrostPossible = 1
         result.reason = string.format(
             "Calculated frost risk is high! Surface temperature is %.1f°C is below threshold with high moisture availability (dew point %.1f°C)",
             surfaceTemp, dewPoint
         )
-        -- Medium risk: freezing but moderate humidity
     elseif moistureAvailability < 3.0 then -- Medium risk (RH ~70-90%)
         result.isFrostPossible = 1
         result.reason = string.format(
             "Calculated frost risk is moderate. Surface temperature (%.1f°C) is below threshold with moderate moisture availability (dew point %.1f°C)",
             surfaceTemp, dewPoint
         )
-        -- Low/no risk: freezing but dry conditions
     else -- Low/no risk (RH <70%)
-        result.isFrostPossible = 1
         result.reason = string.format(
             "Calculated frost risk is minimal. Surface temperature (%.1f°C) is below threshold but conditions are too dry for significant frost (dew point %.1f°C)",
             surfaceTemp, dewPoint
@@ -174,84 +164,7 @@ local function publishResult(eui, topicTemplate, data)
     mq:pub(topic, payload, false, 0)
 end
 
--- Updated function to handle frost inertia/hysteresis
-local function handleFrostState(devEui, frostRiskData, measData, dewPointData)
-    local now = os.time() * 1000
-
-    if frostRiskData.val == 1 then
-        frostClearTracking[devEui] = nil
-
-        -- Only notify on transition from non-frost to frost state
-        if lastFrostState[devEui] ~= 1 then
-            print(string.format("%s Frost state changed for %s from %s -> 1",
-                Timestamp(), devEui, lastFrostState[devEui]))
-            lastFrostState[devEui] = 1
-            SendNotification(devEui, measData, dewPointData, frostRiskData)
-        end
-    else -- frostRiskData.val == 0
-        if lastFrostState[devEui] == 1 then
-            if not frostClearTracking[devEui] then
-                frostClearTracking[devEui] = {
-                    firstClearTime = now,
-                    clearCount = 1
-                }
-                print(string.format("%s Device %s: Starting frost clear tracking", Timestamp(), devEui))
-            else
-                frostClearTracking[devEui].clearCount = frostClearTracking[devEui].clearCount + 1
-                local clearDuration = now - frostClearTracking[devEui].firstClearTime
-                print(string.format("%s Device %s: Clear count: %d, duration: %.1f minutes",
-                    Timestamp(), devEui, frostClearTracking[devEui].clearCount, clearDuration / 60000))
-
-                if frostClearTracking[devEui].clearCount >= CONFIG.FROST_INERTIA.MIN_SAMPLES and
-                    clearDuration >= CONFIG.FROST_INERTIA.REQUIRED_CLEAR_TIME_MS then
-                    print(string.format("%s Frost state cleared for %s after inertia period", Timestamp(), devEui))
-                    lastFrostState[devEui] = 0
-                    frostClearTracking[devEui] = nil
-                    -- No notification sent when frost clears, per requirement
-                end
-            end
-        end
-    end
-end
-
--- Helper function to create and send frost notification payload
-function SendNotification(devEui, measData, dewPointData, frostRiskData)
-    local device = edge.findDevice({ eui = devEui })
-    if not device then
-        print(string.format("%s Device not found for EUI %s. Skipping notification..", Timestamp(), devEui))
-        return
-    end
-
-    if measData.airTemp == "" or measData.humidity == "" or measData.surfaceTemp == "" then
-        print(string.format("%s Missing data for device %s. Skipping notification..", Timestamp(), devEui))
-        return
-    end
-
-    local notifyPayload = {
-        device_name = device.meta.name,
-        wrm_grafana_name = device.meta.WRM_grafana_name,
-        device_id = device.id,
-        device_eui = devEui,
-        humidity = measData.humidity,
-        air_temperature = measData.airTemp,
-        surface_temperature = measData.surfaceTemp,
-        dew_point = dewPointData.val,
-        value = frostRiskData.val,
-        msg = frostRiskData.msg,
-        timestamp = edge:time()
-    }
-
-    print(string.format("%s Sending frost notification for device %s:\n%s",
-        Timestamp(), devEui, json:encode(notifyPayload)))
-
-    if cfg.notification_output then
-        lynx.notify(cfg.notification_output, notifyPayload)
-    else
-        print("Notification output not configured, not sent..")
-    end
-end
-
--- Simplified handleMessage function (replace the existing one)
+-- read function data, perform action depending on logic
 local function handleMessage(topic, payload)
     local fun = topicFunctionMap[topic]
     if fun == nil then
@@ -268,7 +181,7 @@ local function handleMessage(topic, payload)
     local value = data.value
     local measurement = measurements[devEui][measurementType]
     if measurement.offset ~= 0 then
-        print(string.format("Applying offset %.1f to %s Original: %.1f -> New: %.1f",
+        print(string.format("Applying offset %.1f to %s measurement. Original: %.1f -> New: %.1f",
             measurement.offset, measurementType, value, value + measurement.offset))
         value = value + measurement.offset
     end
@@ -277,9 +190,9 @@ local function handleMessage(topic, payload)
     measurements[devEui][measurementType].timestamp = timestamp
 
     if hasAllMeasurements(devEui) then
-        local airTemp = ""
-        local humidity = ""
-        local surfaceTemp = ""
+        local airTemp
+        local humidity
+        local surfaceTemp
 
         -- Collect measurements (offsets already applied)
         for key, m in pairs(measurements[devEui]) do
@@ -294,24 +207,55 @@ local function handleMessage(topic, payload)
             m.value = false -- reset value after storing it
         end
 
-        -- Process weather data
         local dewPointData, frostRiskData = processWeatherData(airTemp, humidity, surfaceTemp)
 
-        print(string.format("%s Publishing dew point: %.1f°C, Frost risk: %s",
-            Timestamp(), dewPointData.val, frostRiskData.msg))
+        print(string.format("%s Publishing dew point: %.1f°C, Frost risk: %s", Timestamp(), dewPointData.val,
+            frostRiskData.msg))
         --publishResult(devEui, CONFIG.PUBLISH_TOPICS.dewPoint, dewPointData)
         --publishResult(devEui, CONFIG.PUBLISH_TOPICS.frostPrecipitation, frostRiskData)
 
-        -- Clear processed measurements
-        measurements[devEui].timestamps = {}
 
-        -- Handle frost state changes with inertia (all state management happens here)
-        handleFrostState(
-            devEui,
-            frostRiskData,
-            { humidity = humidity, airTemp = airTemp, surfaceTemp = surfaceTemp },
-            dewPointData
-        )
+        measurements[devEui].timestamps = {}                -- Clear processed measurements
+
+        if lastFrostState[devEui] ~= frostRiskData.val then -- if value has toggled
+            print(string.format("%s frost state has changed for %s from %s to %s", Timestamp(), devEui,
+                lastFrostState[devEui], frostRiskData.val))
+            -- store new value
+            lastFrostState[devEui] = frostRiskData.val
+            if lastFrostState[devEui] == 1 then -- only send notification if frost risk is present
+                device = edge.findDevice({ eui = devEui })
+
+                if device == nil then
+                    print(string.format("%s Device not found for EUI %s. Skipping notification..", Timestamp(), devEui))
+                    return
+                end
+                if airTemp == "" or humidity == "" or surfaceTemp == "" then
+                    print(string.format("%s Missing data for device %s. Skipping notification..", Timestamp(), devEui))
+                    return
+                end
+
+                local notifyPayload = {
+                    device_name = device.meta.name,
+                    wrm_grafana_name = device.meta.WRM_grafana_name,
+                    device_id = device.id,
+                    device_eui = devEui,
+                    humidity = humidity,
+                    air_temperature = airTemp,
+                    surface_temperature = surfaceTemp,
+                    dew_point = dewPointData.val,
+                    value = frostRiskData.val,
+                    msg = frostRiskData.msg,
+                    timestamp = edge:time()
+                }
+                print(string.format("%s Sending notification for device %s with data:\n %s", Timestamp(), devEui,
+                    json:encode(notifyPayload)))
+                if cfg.notification_output then
+                    lynx.notify(cfg.notification_output, notifyPayload)
+                else
+                    print("Notification output not configured, not sent..")
+                end
+            end
+        end
     end
 end
 
@@ -331,11 +275,11 @@ function findFunctions()
     end
 
     -- Iterate through each EUI and its measurements
-    for eui, mes in pairs(requiredMeasurements) do
+    for eui, m in pairs(requiredMeasurements) do
         -- Only process if this EUI belongs to a selected device
         if selectedDeviceEUIs[eui] then
             -- Iterate through each measurement type for this EUI
-            for _, measurementType in ipairs(mes) do
+            for _, measurementType in ipairs(m) do
                 -- Find the function for this measurement type
                 local func = edge.findFunction({ lora_type = measurementType, eui = eui })
                 if func then
@@ -391,6 +335,7 @@ function collectOffsets()
 end
 
 function GetInputFunctions()
+    print("getInputFunctions")
     funs = edge.findFunctions(cfg.functions)
     for _, fun in ipairs(funs) do
         name = fun.meta["lora_type"]
@@ -412,7 +357,7 @@ function GetInputFunctions()
     end
 
     collectOffsets()
-    print("Measurements stored:")
+    print("Measurements structure with offsets:")
     PrintTable(measurements)
 end
 
@@ -432,6 +377,7 @@ function PrintTable(t, indent)
 end
 
 function onStart()
+    print("TESTETESTAS")
     print(string.format("%s Edge-app started", Timestamp()))
     GetInputFunctions()
     CreateOutputFunctions()
