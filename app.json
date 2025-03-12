@@ -2,6 +2,27 @@
     "author": "IoT Open",
     "license": "MIT",
     "input": {
+        "single_function_selector_temperature": {
+            "name": "Pick function to offset",
+            "description": "Make sure you select the correct function for the offset",
+            "type": "single_function_selector",
+            "filter": {
+                "type": "temperature"
+            }
+        },
+        "number_default": {
+            "name": "Set offset",
+            "description": "A positive or negative offset",
+            "type": "number",
+            "default": 0
+        },
+        "text_default_nomulti_noregex": {
+            "name": "Text1",
+            "description": "single line textbox with default \"abc\"",
+            "type": "text",
+            "multiline": false,
+            "default": "abc"
+        },
         "devices": {
             "required": true,
             "name": "Pick devices",
@@ -25,6 +46,25 @@
             "name": "Select notification",
             "description": "Select the notification output to send notifications with.",
             "type": "single_notification_output_selector"
+        },
+        "repeat_nestled": {
+            "name": "Repeat4",
+            "description": "Optional: Add offset to one or multiple temperature functions",
+            "type": "repeat",
+            "input_fields": [
+                "repeat_in_repeat"
+            ],
+            "max": 1
+        },
+        "repeat_in_repeat": {
+            "name": "Temperature offset",
+            "description": "Add Temperature offsets",
+            "type": "repeat",
+            "input_fields": [
+                "single_function_selector_temperature",
+                "number_default"
+            ],
+            "min": 1
         }
     },
     "guide": [
@@ -35,6 +75,7 @@
             "input_fields": [
                 "devices",
                 "functions",
+                "repeat_nestled",
                 "notification_output"
             ]
         }
