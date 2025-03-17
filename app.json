@@ -7,7 +7,11 @@
             "description": "Make sure you select the correct function for the offset",
             "type": "single_function_selector",
             "filter": {
-                "type": "temperature"
+                "type": [
+                    "temperature",
+                    "humidity",
+                    "ext_temperature"
+                ]
             }
         },
         "number_default": {

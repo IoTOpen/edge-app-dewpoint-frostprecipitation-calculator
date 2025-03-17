@@ -1,4 +1,5 @@
 local CONFIG = {
+    VERSION = "1.3.1",
     -- Topics for publishing results
     PUBLISH_TOPICS = {
         dewPoint = "obj/lora/%s/dew_point",
@@ -11,8 +12,9 @@ local CONFIG = {
     },
     -- Add inertia configuration
     FROST_INERTIA = {
-        REQUIRED_CLEAR_TIME_MS = 1800000, -- 30 minutes in milliseconds
-        MIN_SAMPLES = 3                   -- minimum number of clear samples required
+        ENABLED = true,                 -- master switch: set to false to disable all inertia
+        CLEAR_TIME_MS = 60 * 1000 * 45, -- 45min in milliseconds (nil to disable)
+        MIN_SAMPLES = 3                 -- minimum number of clear samples (nil to disable)
     }
 }
 
@@ -29,10 +31,10 @@ local function shouldFunctionBeCreated(eui, topic)
     })
 
     if #functions > 0 then -- if number of functions we looking is more then 0 and input functions is more then 2
-        print(string.format("Function %s already exist on device", string.format('obj/lora/%s/%s', eui, topic)))
+        print(string.format("%s already exist on device", string.format('obj/lora/%s/%s', eui, topic)))
         return false
     end
-    print(string.format("Function %s is missing on device", string.format('obj/lora/%s/%s', eui, topic)))
+    print(string.format("%s is missing on device", string.format('obj/lora/%s/%s', eui, topic)))
     return true
 end
 
@@ -97,11 +99,13 @@ local function checkFrostPrecipitation(surfaceTemp, dewPoint, airTemp)
         reason = ""
     }
 
+    local surfaceThreshold = 2.0   -- Frost threshold temperature (°C), compensate for sensor error margin
+    local moistureThreshold = 4.0  -- Moisture availability threshold (°C),larger span for variation is sensors (RH ~70-100%)
     -- No frost risk if surface temperature is well above freezing
-    if surfaceTemp > 1 then
+    if surfaceTemp > surfaceThreshold then
         result.reason = string.format(
-            "No calculated frost risk. Surface temperature (%.1f°C) is well above threshold",
-            surfaceTemp
+            "Ingen uträknad risk för frost! Marktemperatur: %.1f°C är över tröskelvärdet: %.1f°C",
+            surfaceTemp, surfaceThreshold
         )
         return result
     end
@@ -110,25 +114,16 @@ local function checkFrostPrecipitation(surfaceTemp, dewPoint, airTemp)
     local moistureAvailability = airTemp - dewPoint
 
     -- High risk: freezing + high humidity/close dew point
-    if moistureAvailability <= 1.0 then -- High risk (RH ~90-100%)
+    if moistureAvailability < moistureThreshold then
         result.isFrostPossible = 1
         result.reason = string.format(
-            "Calculated frost risk is high! Surface temperature is %.1f°C is below threshold with high moisture availability (dew point %.1f°C)",
-            surfaceTemp, dewPoint
+            "Risk för frost! Marktemperatur: (%.1f°C), Lufttemperatur: (%.1f°C), Daggpunkt (%.1f°C)",
+            surfaceTemp, airTemp, dewPoint
         )
-        -- Medium risk: freezing but moderate humidity
-    elseif moistureAvailability < 3.0 then -- Medium risk (RH ~70-90%)
-        result.isFrostPossible = 1
+    else
         result.reason = string.format(
-            "Calculated frost risk is moderate. Surface temperature (%.1f°C) is below threshold with moderate moisture availability (dew point %.1f°C)",
-            surfaceTemp, dewPoint
-        )
-        -- Low/no risk: freezing but dry conditions
-    else -- Low/no risk (RH <70%)
-        result.isFrostPossible = 1
-        result.reason = string.format(
-            "Calculated frost risk is minimal. Surface temperature (%.1f°C) is below threshold but conditions are too dry for significant frost (dew point %.1f°C)",
-            surfaceTemp, dewPoint
+            "Ingen uträknad risk för frost! Marktemperatur: (%.1f°C), Lufttemperatur: (%.1f°C), Daggpunkt: (%.1f°C)",
+            surfaceTemp, airTemp, dewPoint
         )
     end
 
@@ -156,7 +151,7 @@ end
 -- function to check if we have all required measurements
 local function hasAllMeasurements(eui)
     for _, m in ipairs(requiredMeasurements[eui]) do
-        if measurements[eui][m].value == false then
+        if measurements[eui][m].value == nil then
             return false
         end
     end
@@ -190,6 +185,14 @@ local function handleFrostState(devEui, frostRiskData, measData, dewPointData)
         end
     else -- frostRiskData.val == 0
         if lastFrostState[devEui] == 1 then
+            -- If inertia is disabled, clear frost state immediately
+            if not CONFIG.FROST_INERTIA.ENABLED then
+                print(string.format("%s Frost state cleared for %s (inertia disabled)",
+                    Timestamp(), devEui))
+                lastFrostState[devEui] = 0
+                return
+            end
+
             if not frostClearTracking[devEui] then
                 frostClearTracking[devEui] = {
                     firstClearTime = now,
@@ -199,15 +202,26 @@ local function handleFrostState(devEui, frostRiskData, measData, dewPointData)
             else
                 frostClearTracking[devEui].clearCount = frostClearTracking[devEui].clearCount + 1
                 local clearDuration = now - frostClearTracking[devEui].firstClearTime
-                print(string.format("%s Device %s: Clear count: %d, duration: %.1f minutes",
-                    Timestamp(), devEui, frostClearTracking[devEui].clearCount, clearDuration / 60000))
 
-                if frostClearTracking[devEui].clearCount >= CONFIG.FROST_INERTIA.MIN_SAMPLES and
-                    clearDuration >= CONFIG.FROST_INERTIA.REQUIRED_CLEAR_TIME_MS then
-                    print(string.format("%s Frost state cleared for %s after inertia period", Timestamp(), devEui))
+                -- Check if either condition is met
+                local samplesMet = CONFIG.FROST_INERTIA.MIN_SAMPLES and
+                    frostClearTracking[devEui].clearCount >= CONFIG.FROST_INERTIA.MIN_SAMPLES
+                local timeMet = CONFIG.FROST_INERTIA.CLEAR_TIME_MS and
+                    clearDuration >= CONFIG.FROST_INERTIA.CLEAR_TIME_MS
+
+                print(string.format("%s Device %s: Clear count: %d, duration: %.1f minutes",
+                    Timestamp(), devEui,
+                    frostClearTracking[devEui].clearCount, clearDuration / 60000))
+
+                -- Clear if either condition is met
+                if samplesMet or timeMet then
+                    print(string.format("%s Frost state cleared for %s (%s)",
+                        Timestamp(), devEui,
+                        samplesMet and timeMet and "both conditions met" or
+                        samplesMet and "sample count met" or
+                        "time duration met"))
                     lastFrostState[devEui] = 0
                     frostClearTracking[devEui] = nil
-                    -- No notification sent when frost clears, per requirement
                 end
             end
         end
@@ -222,7 +236,8 @@ function SendNotification(devEui, measData, dewPointData, frostRiskData)
         return
     end
 
-    if measData.airTemp == "" or measData.humidity == "" or measData.surfaceTemp == "" then
+    -- Check for missing data using nil
+    if not measData.airTemp or not measData.humidity or not measData.surfaceTemp then
         print(string.format("%s Missing data for device %s. Skipping notification..", Timestamp(), devEui))
         return
     end
@@ -241,13 +256,13 @@ function SendNotification(devEui, measData, dewPointData, frostRiskData)
         timestamp = edge:time()
     }
 
-    print(string.format("%s Sending frost notification for device %s:\n%s",
+    print(string.format("%s Sending frost risk notification for device %s:\n%s",
         Timestamp(), devEui, json:encode(notifyPayload)))
 
     if cfg.notification_output then
         lynx.notify(cfg.notification_output, notifyPayload)
     else
-        print("Notification output not configured, not sent..")
+        print("Notification output not configured, was not sent..")
     end
 end
 
@@ -262,13 +277,13 @@ local function handleMessage(topic, payload)
     local timestamp = edge:time()
     local devEui = fun.meta["eui"]
     local measurementType = fun.meta["lora_type"]
-    print(string.format("Handlemessage: %s - %s: %s", devEui, measurementType, data.value))
+    --print(string.format("Handlemessage: %s - %s: %s", devEui, measurementType, data.value))
 
     -- Apply offset if exists for temperature measurements
     local value = data.value
     local measurement = measurements[devEui][measurementType]
     if measurement.offset ~= 0 then
-        print(string.format("Applying offset %.1f to %s Original: %.1f -> New: %.1f",
+        print(string.format("Applying offset (%.1f) to %s: %.1f -> %.1f",
             measurement.offset, measurementType, value, value + measurement.offset))
         value = value + measurement.offset
     end
@@ -277,9 +292,9 @@ local function handleMessage(topic, payload)
     measurements[devEui][measurementType].timestamp = timestamp
 
     if hasAllMeasurements(devEui) then
-        local airTemp = ""
-        local humidity = ""
-        local surfaceTemp = ""
+        local airTemp = 0
+        local humidity = 0
+        local surfaceTemp = 0
 
         -- Collect measurements (offsets already applied)
         for key, m in pairs(measurements[devEui]) do
@@ -291,16 +306,24 @@ local function handleMessage(topic, payload)
             elseif string.find(key, "air_temp") or string.match(key, "^temperature$") then
                 airTemp = val
             end
-            m.value = false -- reset value after storing it
+            m.value = nil -- reset value to nil instead of false
         end
 
         -- Process weather data
         local dewPointData, frostRiskData = processWeatherData(airTemp, humidity, surfaceTemp)
 
-        print(string.format("%s Publishing dew point: %.1f°C, Frost risk: %s",
-            Timestamp(), dewPointData.val, frostRiskData.msg))
-        --publishResult(devEui, CONFIG.PUBLISH_TOPICS.dewPoint, dewPointData)
-        --publishResult(devEui, CONFIG.PUBLISH_TOPICS.frostPrecipitation, frostRiskData)
+        print(string.format("%s %s Publishing dew point: %.1f°C, Frost risk: %s",
+            Timestamp(), devEui, dewPointData.val, frostRiskData.val))
+        publishResult(devEui, CONFIG.PUBLISH_TOPICS.dewPoint, dewPointData)
+
+        print(frostRiskData.val, lastFrostState[devEui])
+        -- Only publish frost precipitation if it's 1 or if lastFrostState is 0
+        if frostRiskData.val == 1 or lastFrostState[devEui] == nil or lastFrostState[devEui] == 0 then
+            publishResult(devEui, CONFIG.PUBLISH_TOPICS.frostPrecipitation, frostRiskData)
+        else -- Skip publishing frost precipitation if it's 0 and last state was 1
+            print(string.format("%s Skipping frost precipitation publish for %s (last state was 1)",
+                Timestamp(), devEui))
+        end
 
         -- Clear processed measurements
         measurements[devEui].timestamps = {}
@@ -370,6 +393,11 @@ function onFunctionsUpdated()
 end
 
 function collectOffsets()
+    if not cfg.repeat_nestled then
+        print("No offset configuration found (cfg.repeat_nestled is nil)")
+        return
+    end
+
     for _, repeatGroup in pairs(cfg.repeat_nestled) do
         if repeatGroup.repeat_in_repeat then
             for _, item in pairs(repeatGroup.repeat_in_repeat) do
@@ -382,7 +410,7 @@ function collectOffsets()
 
                     if measurements[eui] and measurements[eui][measurementType] then
                         measurements[eui][measurementType].offset = offset
-                        print(string.format("Collected offset %.1f for %s", offset, measurementType))
+                        print(string.format("Collected offset (%.1f) for %s", offset, measurementType))
                     end
                 end
             end
@@ -405,34 +433,17 @@ function GetInputFunctions()
         -- Add the measurement requirement for this specific EUI
         table.insert(requiredMeasurements[eui], name)
         measurements[eui][name] = {
-            value = false,
+            value = nil, -- changed from false to nil
             offset = 0,
             timestamp = os.time() * 1000
         }
     end
 
     collectOffsets()
-    print("Measurements stored:")
-    PrintTable(measurements)
-end
-
-function PrintTable(t, indent)
-    indent = indent or 0
-    local indentStr = string.rep("  ", indent)
-
-    for k, v in pairs(t) do
-        local kStr = tostring(k)
-        if type(v) == "table" then
-            print(indentStr .. kStr .. ":")
-            PrintTable(v, indent + 1)
-        else
-            print(indentStr .. kStr .. " = " .. tostring(v))
-        end
-    end
 end
 
 function onStart()
-    print(string.format("%s Edge-app started", Timestamp()))
+    print(string.format("%s Edge-app %s started", Timestamp(), CONFIG.VERSION))
     GetInputFunctions()
     CreateOutputFunctions()
     mq:bind("#", handleMessage)

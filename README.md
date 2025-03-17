@@ -43,9 +43,9 @@ b = 237.7
 
 ### Frost Precipitation
 
-Logic for calculating frost precipitation, make use of calculated dew point and surface temperature.
+The logic for calculating frost precipitation uses the calculated dew point and surface temperature.
 
-If the surface temperature is below freezing and below dew point then we can assume there is a risk for frost. Otherwise we assume there is no risk or very unlikely.
+If the surface temperature is below the threshold (set 2 degrees higher than the freezing point to compensate for sensor error margin) and the difference between air temperature and dew point is within the set margin*, we assume there is a risk for frost. Otherwise, we assume there is no risk or it is very unlikely.
 
 #### Code
 
@@ -53,11 +53,18 @@ If the surface temperature is below freezing and below dew point then we can ass
 1 = Frost is possible
 
 ```lua
-    -- No frost risk if surface temperature is above freezing
-    if surfaceTemp > 0 then
+      local result = {
+        isFrostPossible = 0,
+        reason = ""
+    }
+
+    local surfaceThreshold = 2.0 -- Frost threshold temperature (°C), compensate for sensor error margin
+     local moistureThreshold = 4.0 -- Moisture availability threshold (°C),larger span for variation is sensors (RH ~70-100%)
+    -- No frost risk if surface temperature is well above freezing
+    if surfaceTemp > surfaceThreshold then
         result.reason = string.format(
-            "No frost risk. Surface temperature (%.1f°C) is above freezing",
-            surfaceTemp
+            "Ingen uträknad risk för frost! Marktemperatur: %.1f°C är över tröskelvärdet: %.1f°C",
+            surfaceTemp, surfaceThreshold
         )
         return result
     end
@@ -66,32 +73,31 @@ If the surface temperature is below freezing and below dew point then we can ass
     local moistureAvailability = airTemp - dewPoint
 
     -- High risk: freezing + high humidity/close dew point
-    if moistureAvailability <= 1.0 then -- High risk (RH ~90-100%)
+    if moistureAvailability < moistureThreshold then
         result.isFrostPossible = 1
         result.reason = string.format(
-            "High frost risk! Surface temperature is %.1f°C is below with high moisture availability (dew point %.1f°C)",
-            surfaceTemp, dewPoint
+            "Risk för frost! Marktemperatur: (%.1f°C), Lufttemperatur: (%.1f°C), Daggpunkt (%.1f°C)",
+            surfaceTemp, airTemp, dewPoint
         )
-        -- Medium risk: freezing but moderate humidity
-    elseif moistureAvailability < 3.0 then -- Medium risk (RH ~70-90%)
-        result.isFrostPossible = 1
+    else
         result.reason = string.format(
-            "Moderate frost risk. Surface temperature (%.1f°C) is below freezing with moderate moisture availability (dew point %.1f°C)",
-            surfaceTemp, dewPoint
-        )
-        -- Low/no risk: freezing but dry conditions
-    else -- Low/no risk (RH <70%)
-        result.reason = string.format(
-            "Minimal frost risk. Surface temperature (%.1f°C) is below freezing but conditions are too dry for significant frost (dew point %.1f°C)",
-            surfaceTemp, dewPoint
+            "Ingen uträknad risk för frost! Marktemperatur: (%.1f°C), Lufttemperatur: (%.1f°C), Daggpunkt: (%.1f°C)",
+            surfaceTemp, airTemp, dewPoint
         )
     end
 
     return result
 ```
 
-[Refrence](https://www.weather.gov/source/zhu/ZHU_Training_Page/fog_stuff/Dew_Frost/Dew_Frost.htm)
-[Reference, sida 39](https://www.diva-portal.org/smash/get/diva2:673365/FULLTEXT01.pdf)
+\* We assume there is not enough moisture in the air when the difference between air temperature and dew point is to large, first reference.
+
+[Refrence 1](https://www.weather.gov/source/zhu/ZHU_Training_Page/fog_stuff/Dew_Frost/Dew_Frost.htm)
+[Reference 2, sida 39](https://www.diva-portal.org/smash/get/diva2:673365/FULLTEXT01.pdf)
+
+## Frost ok intertia
+
+The app includes a frost inertia feature to prevent rapid changes in frost status. This helps avoid false alarms and provides more stable readings by requiring consistent conditions over time before changing the frost precipitation status.
+Conditions that are needed to be met are 3 ok in a row or that no ok came in during 45min from the last one.
 
 ## Output Topics
 
