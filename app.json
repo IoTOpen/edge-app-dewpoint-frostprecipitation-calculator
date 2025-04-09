@@ -2,6 +2,31 @@
     "author": "IoT Open",
     "license": "MIT",
     "input": {
+        "single_function_selector_temperature": {
+            "name": "Pick function to offset",
+            "description": "Make sure you select the correct function for the offset",
+            "type": "single_function_selector",
+            "filter": {
+                "type": [
+                    "temperature",
+                    "humidity",
+                    "ext_temperature"
+                ]
+            }
+        },
+        "number_default": {
+            "name": "Set offset",
+            "description": "A positive or negative offset",
+            "type": "number",
+            "default": 0
+        },
+        "text_default_nomulti_noregex": {
+            "name": "Text1",
+            "description": "single line textbox with default \"abc\"",
+            "type": "text",
+            "multiline": false,
+            "default": "abc"
+        },
         "devices": {
             "required": true,
             "name": "Pick devices",
@@ -20,6 +45,30 @@
                     "ext_temperature"
                 ]
             }
+        },
+        "notification_output": {
+            "name": "Select notification",
+            "description": "Select the notification output to send notifications with.",
+            "type": "single_notification_output_selector"
+        },
+        "repeat_nestled": {
+            "name": "Repeat4",
+            "description": "Optional: Add offset to one or multiple temperature functions",
+            "type": "repeat",
+            "input_fields": [
+                "repeat_in_repeat"
+            ],
+            "max": 1
+        },
+        "repeat_in_repeat": {
+            "name": "Temperature offset",
+            "description": "Add Temperature offsets",
+            "type": "repeat",
+            "input_fields": [
+                "single_function_selector_temperature",
+                "number_default"
+            ],
+            "min": 1
         }
     },
     "guide": [
@@ -29,7 +78,9 @@
             "description": "Choose the devices which should have dew point and frost precipitation calculated. These 3 function need to be selected for each device: Temperature(air), Humidity and Surface Temperature. Function names may differ depending on what sensor is being used. Use the eui in the device name to match which functions to use.",
             "input_fields": [
                 "devices",
-                "functions"
+                "functions",
+                "repeat_nestled",
+                "notification_output"
             ]
         }
     ]
